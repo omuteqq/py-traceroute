@@ -8,7 +8,7 @@ import os
 ICMP_ECHO_REQUEST = 8
 ICMP_TIME_EXCEEDED = 11
 ICMP_CODE = socket.getprotobyname("icmp")
-MAX_HOPS = 30
+MAX_HOPS = 90
 PACKET_SIZE = 60
 TIMEOUT = 5.0
 
@@ -44,29 +44,40 @@ def traceroute(target, resolve=False):
         print(f"Не удалось разрешить {target}")
         sys.exit(1)
     
-    print(f"Трассировка маршрута к {target} [{dest_ip}]\n")
+    print(f"Трассировка маршрута к {target} [{dest_ip}]")
+    print("с максимальным числом прыжков 30:\n")
     
     for ttl in range(1, MAX_HOPS + 1):
+        finished = False
         with socket.socket(socket.AF_INET, socket.SOCK_RAW, ICMP_CODE) as send_sock, \
              socket.socket(socket.AF_INET, socket.SOCK_RAW, ICMP_CODE) as recv_sock:
             send_sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, struct.pack('I', ttl))
             recv_sock.settimeout(TIMEOUT)
             recv_sock.bind(("", 0))
             
-            packet = create_packet()
-            send_sock.sendto(packet, (dest_ip, 0))
-            start_time = time.time()
+            results = []
+            for _ in range(3):
+                packet = create_packet()
+                send_sock.sendto(packet, (dest_ip, 0))
+                start_time = time.time()
+                
+                try:
+                    data, addr = recv_sock.recvfrom(512)
+                    elapsed = (time.time() - start_time) * 1000
+                    addr_ip = addr[0]
+                    addr_name = resolve_hostname(addr_ip) if resolve else addr_ip
+                    results.append(f"{elapsed:.0f} ms")
+                    if addr_ip == dest_ip:
+                        finished = True
+                except socket.timeout:
+                    results.append("*")
             
-            try:
-                data, addr = recv_sock.recvfrom(512)
-                elapsed = (time.time() - start_time) * 1000
-                addr_ip = addr[0]
-                addr_name = resolve_hostname(addr_ip) if resolve else addr_ip
-                print(f"{ttl}\t{elapsed:.2f} ms\t{addr_name} [{addr_ip}]")
-                if addr_ip == dest_ip:
-                    break
-            except socket.timeout:
-                print(f"{ttl}\t*\tЗапрос истёк")
+            print(f"{ttl:2}  {'  '.join(results)}  {addr_name} [{addr_ip}]" if results else f"{ttl:2}  *  *  *  Превышен интервал ожидания для запроса.")
+        
+        if finished:
+            break
+    
+    print("\nТрассировка завершена.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Traceroute на Python")
